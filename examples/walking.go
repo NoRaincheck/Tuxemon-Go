@@ -1,4 +1,4 @@
-package main
+package walking
 
 import (
 	"bytes"
@@ -210,7 +210,7 @@ func main() {
 	runnerImage = ebiten.NewImageFromImage(img)
 
 	ebiten.SetWindowSize(screenWidth*2, screenHeight*2)
-	ebiten.SetWindowTitle("Animation (Ebitengine Demo)")
+	ebiten.SetWindowTitle("Walking")
 	ebiten.SetWindowResizingMode(ebiten.WindowResizingModeEnabled)
 	if err := ebiten.RunGame(game); err != nil {
 		log.Fatal(err)
