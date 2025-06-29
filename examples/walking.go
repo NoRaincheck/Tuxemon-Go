@@ -15,204 +15,232 @@ import (
 	"tuxemon/mods/tuxemon/spritesheets"
 )
 
+// Walking game configuration constants
 const (
-	screenWidth  = 240
-	screenHeight = 160
-
-	frameOX    = 0
-	frameOY    = 32
-	gridSize   = 16
-	frameCount = 3
-	gridXSize  = screenWidth / gridSize
-	gridYSize  = screenHeight / gridSize
-
-	spriteWidth  = 16
-	spriteHeight = 32
-
-	frameSpeed = 100
+	WalkingScreenWidth           = 240
+	WalkingScreenHeight          = 160
+	WalkingGridSize              = 16
+	WalkingSpriteWidth           = 16
+	WalkingSpriteHeight          = 32
+	WalkingFrameOX               = 0
+	WalkingFrameOY               = 32
+	WalkingAnimationTickInterval = 10
+	WalkingFrameCount            = 3
+	WalkingGridXSize             = WalkingScreenWidth / WalkingGridSize
+	WalkingGridYSize             = WalkingScreenHeight / WalkingGridSize
 )
 
-const (
-	adventureTickUpdateInterval = 10
-)
-
-var (
-	runnerImage *ebiten.Image
-)
-
-type Game struct {
-	count int
-
-	// keeping track of the adventurer's state
-	adventurerX         int
-	adventurerY         int
-	deltaX              int
-	deltaY              int
-	deltaXFrame         int
-	deltaYFrame         int
-	isMoving            bool
-	adventureTickOffset int
-	prevKeyPressed      ebiten.Key
+// WalkingMovementState represents the current movement state of the adventurer
+type WalkingMovementState struct {
+	DeltaX   int
+	DeltaY   int
+	FrameX   int
+	FrameY   int
+	IsMoving bool
 }
 
-type AdventurerInterimState struct {
-	deltaX      int
-	deltaY      int
-	deltaXFrame int
-	deltaYFrame int
-	isMoving    bool
+// WalkingAdventurer represents the player character
+type WalkingAdventurer struct {
+	X, Y           int
+	DeltaX, DeltaY int
+	FrameX, FrameY int
+	IsMoving       bool
+	TickOffset     int
+	PrevKey        ebiten.Key
 }
 
-func getAdventurerInterimState(key ebiten.Key) AdventurerInterimState {
+// WalkingGame represents the main game state
+type WalkingGame struct {
+	count      int
+	adventurer *WalkingAdventurer
+	runnerImg  *ebiten.Image
+}
+
+// NewWalkingAdventurer creates a new adventurer instance
+func NewWalkingAdventurer() *WalkingAdventurer {
+	return &WalkingAdventurer{
+		X: WalkingGridXSize / 2,
+		Y: WalkingGridYSize / 2,
+	}
+}
+
+// getWalkingMovementState returns the movement state for a given key
+func getWalkingMovementState(key ebiten.Key) WalkingMovementState {
 	switch key {
 	case ebiten.KeyLeft:
-		return AdventurerInterimState{
-			deltaX:      -1,
-			deltaY:      0,
-			deltaXFrame: 0,
-			deltaYFrame: 2,
-			isMoving:    true,
+		return WalkingMovementState{
+			DeltaX:   -1,
+			DeltaY:   0,
+			FrameX:   0,
+			FrameY:   2,
+			IsMoving: true,
 		}
 	case ebiten.KeyRight:
-		return AdventurerInterimState{
-			deltaX:      1,
-			deltaY:      0,
-			deltaXFrame: 0,
-			deltaYFrame: 3,
-			isMoving:    true,
+		return WalkingMovementState{
+			DeltaX:   1,
+			DeltaY:   0,
+			FrameX:   0,
+			FrameY:   3,
+			IsMoving: true,
 		}
 	case ebiten.KeyUp:
-		return AdventurerInterimState{
-			deltaX:      0,
-			deltaY:      -1,
-			deltaXFrame: 0,
-			deltaYFrame: 1,
-			isMoving:    true,
+		return WalkingMovementState{
+			DeltaX:   0,
+			DeltaY:   -1,
+			FrameX:   0,
+			FrameY:   1,
+			IsMoving: true,
 		}
 	case ebiten.KeyDown:
-		return AdventurerInterimState{
-			deltaX:      0,
-			deltaY:      1,
-			deltaXFrame: 0,
-			deltaYFrame: 0,
-			isMoving:    true,
+		return WalkingMovementState{
+			DeltaX:   0,
+			DeltaY:   1,
+			FrameX:   0,
+			FrameY:   0,
+			IsMoving: true,
 		}
 	}
-	return AdventurerInterimState{}
+	return WalkingMovementState{}
 }
 
-func (g *Game) updateAdventurerState() {
-	if !g.isMoving {
-		// check if a direction key is pressed for the character
-		var keys []ebiten.Key
-		var interimState AdventurerInterimState
-		keys = inpututil.AppendPressedKeys(keys)
+// isWalkingWithinBounds checks if the given position is within the game bounds
+func isWalkingWithinBounds(x, y int) bool {
+	return x >= 0 && x < WalkingGridXSize && y >= 0 && y < (WalkingGridYSize-1)
+}
 
-		if slices.Contains(keys, g.prevKeyPressed) {
-			interimState = getAdventurerInterimState(g.prevKeyPressed)
-		} else {
-			for _, key := range keys {
-				interimState = getAdventurerInterimState(key)
-				if interimState.isMoving {
-					break
-				}
+// updateWalkingMovement handles the movement logic for the adventurer
+func (a *WalkingAdventurer) updateWalkingMovement(count int) {
+	if !a.IsMoving {
+		a.handleWalkingInput(count)
+	} else {
+		a.updateWalkingAnimation(count)
+	}
+}
+
+// handleWalkingInput processes input and starts movement if valid
+func (a *WalkingAdventurer) handleWalkingInput(count int) {
+	keys := inpututil.AppendPressedKeys(nil)
+	var movementState WalkingMovementState
+	if slices.Contains(keys, a.PrevKey) {
+		movementState = getWalkingMovementState(a.PrevKey)
+	} else {
+		for _, key := range keys {
+			movementState = getWalkingMovementState(key)
+			if movementState.IsMoving {
+				break
 			}
 		}
-
-		// ensure never out of bounds
-		if g.adventurerX+interimState.deltaX < 0 {
-			interimState = AdventurerInterimState{}
-		}
-		if g.adventurerX+interimState.deltaX >= gridXSize {
-			interimState = AdventurerInterimState{}
-		}
-		if g.adventurerY+interimState.deltaY < 0 {
-			interimState = AdventurerInterimState{}
-		}
-		if g.adventurerY+interimState.deltaY >= (gridYSize - 1) {
-			interimState = AdventurerInterimState{}
-		}
-
-		if interimState.isMoving {
-			g.isMoving = true
-			g.deltaX = interimState.deltaX
-			g.deltaY = interimState.deltaY
-			g.adventureTickOffset = g.count
-			g.deltaXFrame = 0
-			g.deltaYFrame = interimState.deltaYFrame
-		}
-	} else {
-		// now update state to determine how to actually animate the adventurer
-		if g.count-g.adventureTickOffset < adventureTickUpdateInterval {
-			g.deltaXFrame = 1
-		} else if g.count-g.adventureTickOffset < adventureTickUpdateInterval*2 {
-			g.deltaXFrame = 2
-		} else {
-			g.deltaXFrame = 0
-			g.isMoving = false
-			g.adventurerX += g.deltaX
-			g.adventurerY += g.deltaY
-			g.deltaX = 0
-			g.deltaY = 0
-		}
+	}
+	if !isWalkingWithinBounds(a.X+movementState.DeltaX, a.Y+movementState.DeltaY) {
+		return
+	}
+	if movementState.IsMoving {
+		a.IsMoving = true
+		a.DeltaX = movementState.DeltaX
+		a.DeltaY = movementState.DeltaY
+		a.TickOffset = count
+		a.FrameX = 0
+		a.FrameY = movementState.FrameY
 	}
 }
 
-func (g *Game) Update() error {
+// updateWalkingAnimation updates the animation frames during movement
+func (a *WalkingAdventurer) updateWalkingAnimation(count int) {
+	tickDiff := count - a.TickOffset
+	if tickDiff < WalkingAnimationTickInterval {
+		a.FrameX = 1
+	} else if tickDiff < WalkingAnimationTickInterval*2 {
+		a.FrameX = 2
+	} else {
+		a.FrameX = 0
+		a.IsMoving = false
+		a.X += a.DeltaX
+		a.Y += a.DeltaY
+		a.DeltaX = 0
+		a.DeltaY = 0
+	}
+}
+
+// Update updates the game state
+func (g *WalkingGame) Update() error {
 	g.count++
-	g.updateAdventurerState()
+	g.adventurer.updateWalkingMovement(g.count)
 	return nil
 }
 
-func (g *Game) Draw(screen *ebiten.Image) {
-	g.drawGrid(screen)
-	g.drawAdventurer(screen)
+// Draw renders the game
+func (g *WalkingGame) Draw(screen *ebiten.Image) {
+	g.drawWalkingGrid(screen)
+	g.drawWalkingAdventurer(screen)
 }
 
-func (g *Game) drawAdventurer(screen *ebiten.Image) {
-	offsetX := gridSize/2 + g.deltaXFrame*(gridSize/3)*g.deltaX
-	offsetY := gridSize/2 + g.deltaXFrame*(gridSize/3)*g.deltaY
+// drawWalkingAdventurer renders the adventurer sprite
+func (g *WalkingGame) drawWalkingAdventurer(screen *ebiten.Image) {
+	offsetX := WalkingGridSize/2 + g.adventurer.FrameX*(WalkingGridSize/3)*g.adventurer.DeltaX
+	offsetY := WalkingGridSize/2 + g.adventurer.FrameX*(WalkingGridSize/3)*g.adventurer.DeltaY
 	op := &ebiten.DrawImageOptions{}
-	op.GeoM.Translate(-float64(spriteWidth)/2, -float64(spriteHeight)/2)
-	op.GeoM.Translate(float64(g.adventurerX*gridSize+offsetX), float64(g.adventurerY*gridSize+offsetY))
-	sx, sy := frameOX+g.deltaXFrame*spriteWidth, frameOY*g.deltaYFrame
-	screen.DrawImage(runnerImage.SubImage(image.Rect(sx, sy, sx+spriteWidth, sy+spriteHeight)).(*ebiten.Image), op)
+	op.GeoM.Translate(-float64(WalkingSpriteWidth)/2, -float64(WalkingSpriteHeight)/2)
+	op.GeoM.Translate(
+		float64(g.adventurer.X*WalkingGridSize+offsetX),
+		float64(g.adventurer.Y*WalkingGridSize+offsetY),
+	)
+	sx := WalkingFrameOX + g.adventurer.FrameX*WalkingSpriteWidth
+	sy := WalkingFrameOY * g.adventurer.FrameY
+	spriteRect := image.Rect(sx, sy, sx+WalkingSpriteWidth, sy+WalkingSpriteHeight)
+	screen.DrawImage(g.runnerImg.SubImage(spriteRect).(*ebiten.Image), op)
 }
 
-func (g *Game) drawGrid(screen *ebiten.Image) {
-	for x := 0; x < gridXSize; x++ {
-		for y := 0; y <= gridYSize; y++ {
+// drawWalkingGrid renders the background grid
+func (g *WalkingGame) drawWalkingGrid(screen *ebiten.Image) {
+	for x := 0; x < WalkingGridXSize; x++ {
+		for y := 0; y <= WalkingGridYSize; y++ {
 			if x%2 == y%2 {
-				// note that the y grid starts with an offset due to the sprite size
-				vector.DrawFilledRect(screen, float32(x*gridSize), float32(y*gridSize)-float32(gridSize/2), float32(gridSize), float32(gridSize), color.RGBA{0x80, 0x80, 0x80, 0xc0}, true)
+				vector.DrawFilledRect(
+					screen,
+					float32(x*WalkingGridSize),
+					float32(y*WalkingGridSize)-float32(WalkingGridSize/2),
+					float32(WalkingGridSize),
+					float32(WalkingGridSize),
+					color.RGBA{0x80, 0x80, 0x80, 0xc0},
+					true,
+				)
 			}
 		}
 	}
 }
 
-func (g *Game) Layout(outsideWidth, outsideHeight int) (int, int) {
-	return screenWidth, screenHeight
+// Layout returns the logical screen size
+func (g *WalkingGame) Layout(outsideWidth, outsideHeight int) (int, int) {
+	return WalkingScreenWidth, WalkingScreenHeight
 }
 
-func (g *Game) NewGame() {
-	g.adventurerX = gridXSize / 2
-	g.adventurerY = gridYSize / 2
+// NewWalkingGame creates a new game instance
+func NewWalkingGame() *WalkingGame {
+	return &WalkingGame{
+		adventurer: NewWalkingAdventurer(),
+	}
+}
+
+// loadWalkingSprites loads the sprite assets
+func loadWalkingSprites() (*ebiten.Image, error) {
+	img, _, err := image.Decode(bytes.NewReader(spritesheets.Adventurer_walk_png))
+	if err != nil {
+		return nil, err
+	}
+	return ebiten.NewImageFromImage(img), nil
 }
 
 func main() {
-	game := &Game{}
-	game.NewGame()
-	// Decode an image from the image file's byte slice.
-	img, _, err := image.Decode(bytes.NewReader(spritesheets.Adventurer_walk_png))
+	game := NewWalkingGame()
+	runnerImg, err := loadWalkingSprites()
 	if err != nil {
-		log.Fatal(err)
+		log.Fatal("Failed to load sprites:", err)
 	}
-	runnerImage = ebiten.NewImageFromImage(img)
-
-	ebiten.SetWindowSize(screenWidth*2, screenHeight*2)
+	game.runnerImg = runnerImg
+	ebiten.SetWindowSize(WalkingScreenWidth*2, WalkingScreenHeight*2)
 	ebiten.SetWindowTitle("Walking")
 	ebiten.SetWindowResizingMode(ebiten.WindowResizingModeEnabled)
 	if err := ebiten.RunGame(game); err != nil {
-		log.Fatal(err)
+		log.Fatal("Failed to run game:", err)
 	}
 }
